@@ -48,10 +48,8 @@ export default function Home() {
   useEffect(() => {
     const savedKey = localStorage.getItem("finance_user_key");
     if (savedKey) {
-      console.log("🔍 Found saved key in localStorage, validating...");
       validateAndLoad(savedKey);
     } else {
-      console.log("ℹ️ No saved key found. Prompting for access.");
       setIsAuthModalOpen(true);
       setIsLoading(false);
     }
@@ -61,7 +59,6 @@ export default function Home() {
     setIsLoading(true);
     setAuthError(null);
     try {
-      console.log("🌐 Attempting to connect to Vercel KV Storage...");
       const res = await fetch("/api/transactions", {
         headers: { "x-user-key": key }
       });
@@ -75,8 +72,7 @@ export default function Home() {
         localStorage.setItem("finance_user_key", key);
         setIsAuthModalOpen(false);
       } else {
-        const errData = await res.json();
-        console.error("❌ Auth Failed:", errData.error || "Unauthorized");
+        console.error("❌ Auth Failed");
         setAuthError("Invalid Access Key. Please check your Vercel Environment Variables.");
         setIsAuthModalOpen(true);
       }
@@ -100,7 +96,6 @@ export default function Home() {
 
   const handleLogout = () => {
     if (confirm("Reset Access Key and switch to Demo Mode?")) {
-      console.log("🔄 Resetting application state...");
       localStorage.removeItem("finance_user_key");
       window.location.reload();
     }
@@ -111,7 +106,6 @@ export default function Home() {
     setTransactions(newTransactions);
     
     if (storageMode === "online" && userKey) {
-      console.log("☁️ Syncing transactions with Vercel KV...");
       try {
         const res = await fetch("/api/transactions", {
           method: "POST",
@@ -122,13 +116,22 @@ export default function Home() {
           body: JSON.stringify(newTransactions),
         });
         if (!res.ok) throw new Error("Sync failed");
-        console.log("✅ Sync Successful.");
       } catch (err) {
         console.error("❌ Online save error:", err);
       }
     } else {
-      console.log("💾 Saving transactions to browser LocalStorage...");
       localStorage.setItem("finance_transactions_local", JSON.stringify(newTransactions));
+    }
+  };
+
+  const handleDeleteTransaction = (id: number) => {
+    if (confirm("Are you sure you want to delete this transaction?")) {
+      const updated = transactions.filter(t => t.id !== id);
+      saveTransactions(updated);
+      // If drilldown is open, update its items too
+      if (isDrillDownOpen) {
+        setDrillDownData(prev => ({ ...prev, items: prev.items.filter(t => t.id !== id) }));
+      }
     }
   };
 
@@ -329,7 +332,12 @@ export default function Home() {
         <header className="top-header">
           <div className="greeting">
             <h1>Welcome, {storageMode === 'online' ? 'Ganesh' : 'Demo User'}!</h1>
-            <p>{storageMode === 'online' ? "Your private finance data is synced." : "Exploring the features? Your data stays in this browser."}</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <div className={`status-dot ${storageMode === 'online' ? 'online' : 'offline'}`}></div>
+              <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                {storageMode === 'online' ? "Cloud Sync Active" : "Demo Mode (Local Only)"}
+              </p>
+            </div>
           </div>
           <button className="btn-primary" onClick={() => setIsModalOpen(true)}>
             <i className="fas fa-plus"></i> Add Transaction
@@ -430,9 +438,11 @@ export default function Home() {
                             <div className="item-info">
                               <h4>{t.description}</h4>
                               <p>{formatDate(t.date)} | <span style={{ color: 'var(--primary-color)', fontWeight: 600 }}>{t.category}</span></p>
-                              <span className="item-method">{t.method}</span>
                             </div>
-                            <div className={`item-amount ${t.type === 'income' ? 'amount-income' : 'amount-expense'}`}>{t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}</div>
+                            <div className="item-action-group" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                              <div className={`item-amount ${t.type === 'income' ? 'amount-income' : 'amount-expense'}`}>{t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}</div>
+                              <button className="btn-delete" onClick={() => handleDeleteTransaction(t.id)} title="Delete"><i className="fas fa-trash-alt"></i></button>
+                            </div>
                          </div>
                        ))}
                     </div>
@@ -455,7 +465,6 @@ export default function Home() {
                     <div className="group-summary">
                       <span className="amount-income">IN: {formatCurrency(groupedTransactions[m].in)}</span>
                       <span className="amount-expense">OUT: {formatCurrency(groupedTransactions[m].out)}</span>
-                      <span style={{ color: groupedTransactions[m].in - groupedTransactions[m].out >= 0 ? 'var(--primary-color)' : 'var(--expense-color)' }}>BAL: {formatCurrency(groupedTransactions[m].in - groupedTransactions[m].out)}</span>
                     </div>
                   </div>
                   {groupedTransactions[m].items.map(t => (
@@ -464,9 +473,11 @@ export default function Home() {
                       <div className="item-info">
                         <h4>{t.description}</h4>
                         <p>{formatDate(t.date)} | <span style={{ color: 'var(--primary-color)', fontWeight: 600 }}>{t.category}</span></p>
-                        <span className="item-method">{t.method}</span>
                       </div>
-                      <div className={`item-amount ${t.type === 'income' ? 'amount-income' : 'amount-expense'}`}>{t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}</div>
+                      <div className="item-action-group" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                        <div className={`item-amount ${t.type === 'income' ? 'amount-income' : 'amount-expense'}`}>{t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}</div>
+                        <button className="btn-delete" onClick={() => handleDeleteTransaction(t.id)} title="Delete"><i className="fas fa-trash-alt"></i></button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -623,9 +634,11 @@ export default function Home() {
                      <div className="item-info">
                        <h4>{t.description}</h4>
                        <p>{formatDate(t.date)} | <small>{t.category}</small></p>
-                       <span className="item-method">{t.method}</span>
                      </div>
-                     <div className={`item-amount ${t.type === 'income' ? 'amount-income' : 'amount-expense'}`}>{t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}</div>
+                     <div className="item-action-group" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                        <div className={`item-amount ${t.type === 'income' ? 'amount-income' : 'amount-expense'}`}>{t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}</div>
+                        <button className="btn-delete" onClick={() => handleDeleteTransaction(t.id)} title="Delete"><i className="fas fa-trash-alt"></i></button>
+                      </div>
                    </div>
                  ))}
                </div>
