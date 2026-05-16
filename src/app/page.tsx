@@ -25,10 +25,12 @@ export default function Home() {
     items: [],
   });
   
-  // Auth State
+  // Auth & Storage Mode State
   const [userKey, setUserKey] = useState<string | null>(null);
+  const [storageMode, setStorageMode] = useState<"local" | "online">("local");
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [tempKey, setTempKey] = useState("");
+  const [authError, setAuthError] = useState<string | null>(null);
 
   // Form State
   const [formData, setFormData] = useState({
@@ -42,66 +44,79 @@ export default function Home() {
 
   const [isLoading, setIsLoading] = useState(true);
 
-  // Load Key from localStorage
+  // Initial Auth Check
   useEffect(() => {
     const savedKey = localStorage.getItem("finance_user_key");
     if (savedKey) {
-      setUserKey(savedKey);
+      validateAndLoad(savedKey);
     } else {
       setIsAuthModalOpen(true);
+      setIsLoading(false);
     }
   }, []);
 
-  // Load Data
-  useEffect(() => {
-    if (!userKey) return;
-
-    const fetchData = async () => {
-      try {
-        const res = await fetch("/api/transactions", {
-          headers: { "x-user-key": userKey }
-        });
-        if (res.status === 401) {
-          setIsAuthModalOpen(true);
-          setUserKey(null);
-          localStorage.removeItem("finance_user_key");
-          return;
-        }
+  const validateAndLoad = async (key: string) => {
+    setIsLoading(true);
+    try {
+      const res = await fetch("/api/transactions", {
+        headers: { "x-user-key": key }
+      });
+      
+      if (res.ok) {
         const data = await res.json();
         setTransactions(data || []);
-      } catch (err) {
-        console.error("Fetch error:", err);
-      } finally {
-        setIsLoading(false);
+        setUserKey(key);
+        setStorageMode("online");
+        localStorage.setItem("finance_user_key", key);
+        setIsAuthModalOpen(false);
+      } else {
+        // If key failed, switch to Demo/Local mode
+        enterDemoMode("Invalid Key. Entering Demo Mode (Local Storage Only).");
       }
-    };
-    fetchData();
-  }, [userKey]);
+    } catch (err) {
+      console.error("Auth error:", err);
+      enterDemoMode("Connection Error. Entering Demo Mode.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const enterDemoMode = (msg?: string) => {
+    const localData = JSON.parse(localStorage.getItem("finance_transactions_local") || "[]");
+    setTransactions(localData);
+    setStorageMode("local");
+    setUserKey(null);
+    if (msg) setAuthError(msg);
+    setIsAuthModalOpen(false);
+  };
 
   // Save Data helper
   const saveTransactions = async (newTransactions: Transaction[]) => {
-    if (!userKey) return;
     setTransactions(newTransactions);
-    try {
-      await fetch("/api/transactions", {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          "x-user-key": userKey
-        },
-        body: JSON.stringify(newTransactions),
-      });
-    } catch (err) {
-      console.error("Save error:", err);
+    
+    if (storageMode === "online" && userKey) {
+      try {
+        await fetch("/api/transactions", {
+          method: "POST",
+          headers: { 
+            "Content-Type": "application/json",
+            "x-user-key": userKey
+          },
+          body: JSON.stringify(newTransactions),
+        });
+      } catch (err) {
+        console.error("Online save error:", err);
+      }
+    } else {
+      // Local Mode Save
+      localStorage.setItem("finance_transactions_local", JSON.stringify(newTransactions));
     }
   };
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (tempKey.trim()) {
-      localStorage.setItem("finance_user_key", tempKey);
-      setUserKey(tempKey);
-      setIsAuthModalOpen(false);
+      validateAndLoad(tempKey);
     }
   };
 
@@ -218,7 +233,7 @@ export default function Home() {
   const formatCurrency = (amt: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(amt);
   const formatDate = (d: string) => new Date(d).toLocaleDateString("en-IN", { year: "numeric", month: "short", day: "numeric" });
 
-  if (!userKey && isAuthModalOpen) {
+  if (isAuthModalOpen) {
     return (
       <div className="modal-overlay active">
         <div className="modal" style={{ textAlign: 'center' }}>
@@ -226,27 +241,29 @@ export default function Home() {
             <div className="logo-icon">FF</div>
             <span>FinanceFlow</span>
           </div>
-          <h2 style={{ marginBottom: '1rem' }}>Security Check</h2>
-          <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>Enter your Access Key to view data.</p>
+          <h2 style={{ marginBottom: '1rem' }}>Access Dashboard</h2>
+          <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>Enter your personal key or try the demo.</p>
           <form onSubmit={handleLogin}>
             <div className="form-group">
               <input 
                 type="password" 
-                placeholder="Enter Access Key..." 
+                placeholder="Enter Personal Key..." 
                 value={tempKey} 
-                onChange={(e) => setTempKey(e.target.value)} 
+                onChange={(e) => {setTempKey(e.target.value); setAuthError(null);}} 
                 required 
                 autoFocus
               />
+              {authError && <p style={{ color: 'var(--expense-color)', fontSize: '0.8rem', marginTop: '0.5rem' }}>{authError}</p>}
             </div>
-            <button type="submit" className="btn-submit">Unlock Dashboard</button>
+            <button type="submit" className="btn-submit">Unlock Private Mode</button>
+            <button type="button" className="btn-submit" style={{ background: 'rgba(255,255,255,0.1)', marginTop: '0.5rem' }} onClick={() => enterDemoMode()}>Continue as Demo User</button>
           </form>
         </div>
       </div>
     );
   }
 
-  if (isLoading && userKey) return <div className="loading" style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Loading Finance Data...</div>;
+  if (isLoading) return <div className="loading" style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-color)' }}>Loading Finance Data...</div>;
 
   return (
     <div className="app-container">
@@ -272,11 +289,16 @@ export default function Home() {
             </li>
           </ul>
         </nav>
+        {storageMode === 'local' && (
+          <div style={{ padding: '0.5rem 1rem', background: 'rgba(255,165,0,0.1)', borderRadius: '8px', margin: '1rem', color: 'orange', fontSize: '0.75rem', textAlign: 'center' }}>
+            <i className="fas fa-info-circle"></i> Demo Mode: Data saved locally
+          </div>
+        )}
         <div className="user-profile">
-          <div className="avatar">G</div>
+          <div className="avatar">{storageMode === 'online' ? 'G' : 'D'}</div>
           <div className="user-info">
-            <p className="name">Ganesh</p>
-            <p className="status">Premium User</p>
+            <p className="name">{storageMode === 'online' ? 'Ganesh' : 'Demo User'}</p>
+            <p className="status">{storageMode === 'online' ? 'Private Cloud' : 'Local Storage'}</p>
           </div>
         </div>
       </aside>
@@ -285,8 +307,8 @@ export default function Home() {
       <main className="main-content">
         <header className="top-header">
           <div className="greeting">
-            <h1>Welcome back, Ganesh!</h1>
-            <p>Here's what's happening with your money.</p>
+            <h1>Welcome, {storageMode === 'online' ? 'Ganesh' : 'Demo User'}!</h1>
+            <p>{storageMode === 'online' ? "Your private finance data is synced." : "Exploring the features? Your data stays in this browser."}</p>
           </div>
           <button className="btn-primary" onClick={() => setIsModalOpen(true)}>
             <i className="fas fa-plus"></i> Add Transaction
@@ -476,23 +498,23 @@ export default function Home() {
              <div className="report-card">
                <div style={{ display: 'flex', gap: '1rem', flexDirection: 'column' }}>
                  <button className="btn-primary" onClick={() => {
-                   if (confirm("Logout will clear your Access Key from this browser. Continue?")) {
+                   if (confirm("Logout will clear your Access Key and return to Demo Mode. Continue?")) {
                       localStorage.removeItem("finance_user_key");
                       window.location.reload();
                    }
-                 }}>Logout / Reset Access Key</button>
+                 }}>{storageMode === 'online' ? 'Logout (Exit Private Mode)' : 'Login to Private Mode'}</button>
                  <button className="btn-primary" onClick={() => {
                    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(transactions));
                    const downloadAnchorNode = document.createElement('a');
                    downloadAnchorNode.setAttribute("href", dataStr);
-                   downloadAnchorNode.setAttribute("download", "finance_data.json");
+                   downloadAnchorNode.setAttribute("download", `finance_data_${storageMode}.json`);
                    document.body.appendChild(downloadAnchorNode);
                    downloadAnchorNode.click();
                    downloadAnchorNode.remove();
                  }}>Export Data (JSON)</button>
                  <button className="btn-primary" style={{ background: 'var(--expense-color)' }} onClick={() => {
-                   if (confirm("Delete all data?")) saveTransactions([]);
-                 }}>Clear All Data</button>
+                   if (confirm(`Delete all ${storageMode} data?`)) saveTransactions([]);
+                 }}>Clear All {storageMode === 'online' ? 'Cloud' : 'Local'} Data</button>
                </div>
              </div>
           </div>
