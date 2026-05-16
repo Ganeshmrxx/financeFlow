@@ -1,15 +1,28 @@
 import { NextResponse } from "next/server";
 import { kv, createClient } from "@vercel/kv";
+import Redis from "ioredis";
 
 const KV_KEY = "finance_transactions";
 
-// If KV_URL is missing but REDIS_URL is present, we create a custom client
-const storage = process.env.KV_URL 
-  ? kv 
-  : createClient({
-      url: process.env.REDIS_URL || "",
-      token: process.env.KV_REST_API_TOKEN || "", // Vercel KV token if using Upstash REST
-    });
+// Helper to get the right redis client
+const getStorage = () => {
+  const url = process.env.KV_URL || process.env.REDIS_URL || "";
+  
+  // If it's a standard redis:// or rediss:// URL, use ioredis
+  if (url.startsWith("redis")) {
+    return new Redis(url);
+  }
+  
+  // Otherwise use @vercel/kv (for https:// urls)
+  if (process.env.KV_URL) return kv;
+  
+  return createClient({
+    url: process.env.REDIS_URL || "",
+    token: process.env.KV_REST_API_TOKEN || "",
+  });
+};
+
+const storage = getStorage();
 
 export async function GET(request: Request) {
   const userKey = request.headers.get("x-user-key");
@@ -18,7 +31,13 @@ export async function GET(request: Request) {
   }
 
   try {
-    const transactions = await storage.get(KV_KEY) || [];
+    let transactions;
+    if (storage instanceof Redis) {
+      const data = await storage.get(KV_KEY);
+      transactions = data ? JSON.parse(data) : [];
+    } else {
+      transactions = await storage.get(KV_KEY) || [];
+    }
     return NextResponse.json(transactions);
   } catch (error) {
     console.error("KV GET Error:", error);
@@ -34,8 +53,11 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
-    // In a real app, you'd validate the body here
-    await storage.set(KV_KEY, body);
+    if (storage instanceof Redis) {
+      await storage.set(KV_KEY, JSON.stringify(body));
+    } else {
+      await storage.set(KV_KEY, body);
+    }
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("KV POST Error:", error);
