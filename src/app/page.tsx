@@ -48,8 +48,10 @@ export default function Home() {
   useEffect(() => {
     const savedKey = localStorage.getItem("finance_user_key");
     if (savedKey) {
+      console.log("🔍 Found saved key in localStorage, validating...");
       validateAndLoad(savedKey);
     } else {
+      console.log("ℹ️ No saved key found. Prompting for access.");
       setIsAuthModalOpen(true);
       setIsLoading(false);
     }
@@ -59,12 +61,14 @@ export default function Home() {
     setIsLoading(true);
     setAuthError(null);
     try {
+      console.log("🌐 Attempting to connect to Vercel KV Storage...");
       const res = await fetch("/api/transactions", {
         headers: { "x-user-key": key }
       });
       
       if (res.ok) {
         const data = await res.json();
+        console.log("✅ Storage Connected: Online Mode (Vercel KV)");
         setTransactions(data || []);
         setUserKey(key);
         setStorageMode("online");
@@ -72,13 +76,12 @@ export default function Home() {
         setIsAuthModalOpen(false);
       } else {
         const errData = await res.json();
-        console.error("Auth failed:", errData);
+        console.error("❌ Auth Failed:", errData.error || "Unauthorized");
         setAuthError("Invalid Access Key. Please check your Vercel Environment Variables.");
-        // If it was an auto-load from localStorage, we should open the modal again
         setIsAuthModalOpen(true);
       }
     } catch (err) {
-      console.error("Auth connection error:", err);
+      console.error("❌ Connection Error:", err);
       setAuthError("Connection error. Using local mode as fallback.");
       enterDemoMode();
     } finally {
@@ -87,6 +90,7 @@ export default function Home() {
   };
 
   const enterDemoMode = () => {
+    console.log("⚠️ Storage Warning: Local Mode (Demo/Offline)");
     const localData = JSON.parse(localStorage.getItem("finance_transactions_local") || "[]");
     setTransactions(localData);
     setStorageMode("local");
@@ -96,6 +100,7 @@ export default function Home() {
 
   const handleLogout = () => {
     if (confirm("Reset Access Key and switch to Demo Mode?")) {
+      console.log("🔄 Resetting application state...");
       localStorage.removeItem("finance_user_key");
       window.location.reload();
     }
@@ -106,6 +111,7 @@ export default function Home() {
     setTransactions(newTransactions);
     
     if (storageMode === "online" && userKey) {
+      console.log("☁️ Syncing transactions with Vercel KV...");
       try {
         const res = await fetch("/api/transactions", {
           method: "POST",
@@ -116,13 +122,12 @@ export default function Home() {
           body: JSON.stringify(newTransactions),
         });
         if (!res.ok) throw new Error("Sync failed");
+        console.log("✅ Sync Successful.");
       } catch (err) {
-        console.error("Online save error:", err);
-        // Fallback to local if sync fails? 
-        // For now just alert or log
+        console.error("❌ Online save error:", err);
       }
     } else {
-      // Local Mode Save
+      console.log("💾 Saving transactions to browser LocalStorage...");
       localStorage.setItem("finance_transactions_local", JSON.stringify(newTransactions));
     }
   };
