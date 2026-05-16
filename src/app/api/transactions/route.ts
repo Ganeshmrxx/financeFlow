@@ -3,7 +3,12 @@ import { NextResponse } from "next/server";
 
 const KV_KEY = "finance_transactions";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const userKey = request.headers.get("x-user-key");
+  if (userKey !== process.env.USER_KEY) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const transactions = await kv.get(KV_KEY) || [];
     return NextResponse.json(transactions);
@@ -14,6 +19,11 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const userKey = request.headers.get("x-user-key");
+  if (userKey !== process.env.USER_KEY) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const body = await request.json();
     // In a real app, you'd validate the body here

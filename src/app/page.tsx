@@ -25,6 +25,11 @@ export default function Home() {
     items: [],
   });
   
+  // Auth State
+  const [userKey, setUserKey] = useState<string | null>(null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [tempKey, setTempKey] = useState("");
+
   // Form State
   const [formData, setFormData] = useState({
     type: "income",
@@ -37,11 +42,31 @@ export default function Home() {
 
   const [isLoading, setIsLoading] = useState(true);
 
+  // Load Key from localStorage
+  useEffect(() => {
+    const savedKey = localStorage.getItem("finance_user_key");
+    if (savedKey) {
+      setUserKey(savedKey);
+    } else {
+      setIsAuthModalOpen(true);
+    }
+  }, []);
+
   // Load Data
   useEffect(() => {
+    if (!userKey) return;
+
     const fetchData = async () => {
       try {
-        const res = await fetch("/api/transactions");
+        const res = await fetch("/api/transactions", {
+          headers: { "x-user-key": userKey }
+        });
+        if (res.status === 401) {
+          setIsAuthModalOpen(true);
+          setUserKey(null);
+          localStorage.removeItem("finance_user_key");
+          return;
+        }
         const data = await res.json();
         setTransactions(data || []);
       } catch (err) {
@@ -51,19 +76,32 @@ export default function Home() {
       }
     };
     fetchData();
-  }, []);
+  }, [userKey]);
 
   // Save Data helper
   const saveTransactions = async (newTransactions: Transaction[]) => {
+    if (!userKey) return;
     setTransactions(newTransactions);
     try {
       await fetch("/api/transactions", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "x-user-key": userKey
+        },
         body: JSON.stringify(newTransactions),
       });
     } catch (err) {
       console.error("Save error:", err);
+    }
+  };
+
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (tempKey.trim()) {
+      localStorage.setItem("finance_user_key", tempKey);
+      setUserKey(tempKey);
+      setIsAuthModalOpen(false);
     }
   };
 
@@ -180,7 +218,35 @@ export default function Home() {
   const formatCurrency = (amt: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(amt);
   const formatDate = (d: string) => new Date(d).toLocaleDateString("en-IN", { year: "numeric", month: "short", day: "numeric" });
 
-  if (isLoading) return <div className="loading">Loading...</div>;
+  if (!userKey && isAuthModalOpen) {
+    return (
+      <div className="modal-overlay active">
+        <div className="modal" style={{ textAlign: 'center' }}>
+          <div className="logo" style={{ justifyContent: 'center', marginBottom: '2rem' }}>
+            <div className="logo-icon">FF</div>
+            <span>FinanceFlow</span>
+          </div>
+          <h2 style={{ marginBottom: '1rem' }}>Security Check</h2>
+          <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>Enter your Access Key to view data.</p>
+          <form onSubmit={handleLogin}>
+            <div className="form-group">
+              <input 
+                type="password" 
+                placeholder="Enter Access Key..." 
+                value={tempKey} 
+                onChange={(e) => setTempKey(e.target.value)} 
+                required 
+                autoFocus
+              />
+            </div>
+            <button type="submit" className="btn-submit">Unlock Dashboard</button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  if (isLoading && userKey) return <div className="loading" style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Loading Finance Data...</div>;
 
   return (
     <div className="app-container">
@@ -409,6 +475,12 @@ export default function Home() {
              <h2 className="section-title">Settings</h2>
              <div className="report-card">
                <div style={{ display: 'flex', gap: '1rem', flexDirection: 'column' }}>
+                 <button className="btn-primary" onClick={() => {
+                   if (confirm("Logout will clear your Access Key from this browser. Continue?")) {
+                      localStorage.removeItem("finance_user_key");
+                      window.location.reload();
+                   }
+                 }}>Logout / Reset Access Key</button>
                  <button className="btn-primary" onClick={() => {
                    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(transactions));
                    const downloadAnchorNode = document.createElement('a');
