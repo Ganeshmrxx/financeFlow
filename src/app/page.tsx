@@ -57,6 +57,7 @@ export default function Home() {
 
   const validateAndLoad = async (key: string) => {
     setIsLoading(true);
+    setAuthError(null);
     try {
       const res = await fetch("/api/transactions", {
         headers: { "x-user-key": key }
@@ -70,24 +71,34 @@ export default function Home() {
         localStorage.setItem("finance_user_key", key);
         setIsAuthModalOpen(false);
       } else {
-        // If key failed, switch to Demo/Local mode
-        enterDemoMode("Invalid Key. Entering Demo Mode (Local Storage Only).");
+        const errData = await res.json();
+        console.error("Auth failed:", errData);
+        setAuthError("Invalid Access Key. Please check your Vercel Environment Variables.");
+        // If it was an auto-load from localStorage, we should open the modal again
+        setIsAuthModalOpen(true);
       }
     } catch (err) {
-      console.error("Auth error:", err);
-      enterDemoMode("Connection Error. Entering Demo Mode.");
+      console.error("Auth connection error:", err);
+      setAuthError("Connection error. Using local mode as fallback.");
+      enterDemoMode();
     } finally {
       setIsLoading(false);
     }
   };
 
-  const enterDemoMode = (msg?: string) => {
+  const enterDemoMode = () => {
     const localData = JSON.parse(localStorage.getItem("finance_transactions_local") || "[]");
     setTransactions(localData);
     setStorageMode("local");
     setUserKey(null);
-    if (msg) setAuthError(msg);
     setIsAuthModalOpen(false);
+  };
+
+  const handleLogout = () => {
+    if (confirm("Reset Access Key and switch to Demo Mode?")) {
+      localStorage.removeItem("finance_user_key");
+      window.location.reload();
+    }
   };
 
   // Save Data helper
@@ -96,7 +107,7 @@ export default function Home() {
     
     if (storageMode === "online" && userKey) {
       try {
-        await fetch("/api/transactions", {
+        const res = await fetch("/api/transactions", {
           method: "POST",
           headers: { 
             "Content-Type": "application/json",
@@ -104,8 +115,11 @@ export default function Home() {
           },
           body: JSON.stringify(newTransactions),
         });
+        if (!res.ok) throw new Error("Sync failed");
       } catch (err) {
         console.error("Online save error:", err);
+        // Fallback to local if sync fails? 
+        // For now just alert or log
       }
     } else {
       // Local Mode Save
@@ -233,7 +247,7 @@ export default function Home() {
   const formatCurrency = (amt: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(amt);
   const formatDate = (d: string) => new Date(d).toLocaleDateString("en-IN", { year: "numeric", month: "short", day: "numeric" });
 
-  if (isAuthModalOpen) {
+  if (isAuthModalOpen && !isLoading) {
     return (
       <div className="modal-overlay active">
         <div className="modal" style={{ textAlign: 'center' }}>
@@ -252,6 +266,7 @@ export default function Home() {
                 onChange={(e) => {setTempKey(e.target.value); setAuthError(null);}} 
                 required 
                 autoFocus
+                style={{ borderColor: authError ? 'var(--expense-color)' : 'var(--glass-border)' }}
               />
               {authError && <p style={{ color: 'var(--expense-color)', fontSize: '0.8rem', marginTop: '0.5rem' }}>{authError}</p>}
             </div>
@@ -263,7 +278,7 @@ export default function Home() {
     );
   }
 
-  if (isLoading) return <div className="loading" style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-color)' }}>Loading Finance Data...</div>;
+  if (isLoading) return <div className="loading" style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-color)', color: 'white' }}>Verifying Identity...</div>;
 
   return (
     <div className="app-container">
@@ -289,17 +304,18 @@ export default function Home() {
             </li>
           </ul>
         </nav>
-        {storageMode === 'local' && (
-          <div style={{ padding: '0.5rem 1rem', background: 'rgba(255,165,0,0.1)', borderRadius: '8px', margin: '1rem', color: 'orange', fontSize: '0.75rem', textAlign: 'center' }}>
-            <i className="fas fa-info-circle"></i> Demo Mode: Data saved locally
+        
+        <div className="user-profile" style={{ position: 'relative' }}>
+          <div className="avatar" style={{ background: storageMode === 'online' ? 'var(--primary-color)' : 'orange' }}>
+            {storageMode === 'online' ? 'G' : 'D'}
           </div>
-        )}
-        <div className="user-profile">
-          <div className="avatar">{storageMode === 'online' ? 'G' : 'D'}</div>
           <div className="user-info">
             <p className="name">{storageMode === 'online' ? 'Ganesh' : 'Demo User'}</p>
             <p className="status">{storageMode === 'online' ? 'Private Cloud' : 'Local Storage'}</p>
           </div>
+          <button onClick={handleLogout} title="Logout/Reset" style={{ position: 'absolute', right: '0', background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+             <i className="fas fa-power-off"></i>
+          </button>
         </div>
       </aside>
 
@@ -497,12 +513,7 @@ export default function Home() {
              <h2 className="section-title">Settings</h2>
              <div className="report-card">
                <div style={{ display: 'flex', gap: '1rem', flexDirection: 'column' }}>
-                 <button className="btn-primary" onClick={() => {
-                   if (confirm("Logout will clear your Access Key and return to Demo Mode. Continue?")) {
-                      localStorage.removeItem("finance_user_key");
-                      window.location.reload();
-                   }
-                 }}>{storageMode === 'online' ? 'Logout (Exit Private Mode)' : 'Login to Private Mode'}</button>
+                 <button className="btn-primary" onClick={handleLogout}>{storageMode === 'online' ? 'Logout (Exit Private Mode)' : 'Switch to Private Mode'}</button>
                  <button className="btn-primary" onClick={() => {
                    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(transactions));
                    const downloadAnchorNode = document.createElement('a');
